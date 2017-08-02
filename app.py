@@ -146,7 +146,7 @@ def scale_data(chromosome, param_start, param_end, measurements, resolution):
 				mimendarray.append(int(index[3]))
 
 				if counter % resolution == 0:
-					final_genome_data.append( (min(mimstartarray), min(mimendarray), width, strand, pval/300, med_diff/300, med_avg/300))
+					final_genome_data.append( (min(mimstartarray), min(mimendarray), width, strand, pval/resolution, med_diff/resolution, med_avg/resolution))
 					pval = 0.0
 					med_diff = 0.0
 					med_avg = 0.0
