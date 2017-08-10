@@ -74,19 +74,14 @@ def get_values(chromosome, param_start, param_end, measurements):
 	strstart = "'"
 	strend = "'"
 	chromosome = strstart + chromosome + strend
-	param_start = strstart + param_start + strend
-	param_end = strstart + param_end + strend
 	truedata = []
 
 	try:
-		x.execute("SELECT * FROM advancehumantbl WHERE seqnames = %s AND start >= %s AND end < %s" %(chromosome, param_start, param_end))
+		x.execute("SELECT pval, meth_diff, meth_avg FROM advancehumantbl WHERE seqnames = %s AND pval = %d AND meth_diff = %d AND meth_avg = %d AND start >= %d AND end < %d" %(chromosome, measurement[0], measurement[1], measurement[2], param_start, param_end))
 		#x.execute("SELECT * FROM advancehumantbl WHERE seqnames = %s AND start >= %s " %(chromosome, param_start))
 		data = x.fetchall()
 
-		for row in data:
-			if measurement in row[7]:
-				truedata.append(row)
-		jsonDumped = json.dumps(truedata)
+		jsonDumped = json.dumps(data)
 		
 		return jsonDumped
 	except:
@@ -96,72 +91,41 @@ def get_values(chromosome, param_start, param_end, measurements):
 
 @app.route("/scale_data/<chromosome>/<int: param_start>/<int: param_end>/<any: measurement>/<int: resolution>")
 def scale_data(chromosome, param_start, param_end, measurements, resolution):
-	conn = MySQLdb.connect(host= "localhost",
-	                  user="root",
-	                  passwd="master",
-	                  db="genome")
-	x = conn.cursor()
-
 	strstart = "'"
 	strend = "'"
 	chromosome = strstart + chromosome + strend
-	param_start = strstart + param_start + strend
-	param_end = strstart + param_end + strend
-	truedata = []
+	seqnames = []
 
 	final_genome_data = []
+	db_connection = sql.connect(host='localhost', database='genome', user='root', password='master')
+	df = pd.read_sql("SELECT * FROM advancehumantbl WHERE seqnames = %s AND pval = %d AND meth_diff = %d AND meth_avg = %d AND start >= %d AND end < %d" %(chromosome, measurement[0], measurement[1], measurement[2], param_start, param_end), con=db_connection)
+	#df = pd.read_sql("SELECT seqnames, start, end, pval, methylation_diff, methylation_avg FROM advancehumantbl", con=db_connection)
 
-	try:
-		x.execute("SELECT * FROM advancehumantbl WHERE seqnames = %s AND start >= %s AND end < %s" %(chromosome, param_start, param_end))
-		#x.execute("SELECT * FROM advancehumantbl WHERE seqnames = %s AND start >= %s " %(chromosome, param_start))
-		data = x.fetchall()
+	if len(df) - resolution < 20:
+			#jsonDumped = json.dumps(df)
+			#return jsonDumped
+			return df
+	else:
+		# Gets the min of start position and max of end position in genome
+		tempMin = df['start'].min()
+		tempMax = df['end'].max()
+		# create random index
+		rindex =  np.array(sample(xrange(len(df)), resolution))
+		seqnames =  df['seqnames'].values[rindex]
 
-		for row in data:
-			if measurement in row[7]:
-				truedata.append(row)
-		#truedata = data
+		# Calculates the average of the pval, meth_diff, and meth_avg for every resolution
+		df = df.groupby(df.index//resolution).mean()
 
-		if len(truedata) - resolution < 20:
-			jsonDumped = json.dumps(truedata)
-			return jsonDumped
-		else:
-			pval = 0.0
-			med_diff = 0.0
-			med_avg = 0.0
-			strand = None
-			width = 1
-			mimstartarray = []
-			mimendarray = []
+		df['seqnames'] = ""
+		for i in range(len(df)):
+			df.set_value(i, 'seqnames', seqnames[i])
 
-			counter = 0
+		df['start'] = tempMin
+		df['end'] = tempMax
 
-			for index in truedata:
-				if index[6] != "NA":
-					pval += float(index[6])
-				med_diff += float(index[7])
-				med_avg += float(index[8])
-				strand = index[5]
-				width = index[4]
-				mimstartarray.append(int(index[2]))
-				mimendarray.append(int(index[3]))
-
-				if counter % resolution == 0:
-					final_genome_data.append( (min(mimstartarray), min(mimendarray), width, strand, pval/resolution, med_diff/resolution, med_avg/resolution))
-					pval = 0.0
-					med_diff = 0.0
-					med_avg = 0.0
-					mimstartarray = []
-					mimendarray = []
-
-				counter += 1
-
-			jsonDumped = json.dumps(final_genome_data)
-
-			return jsonDumped
-	except:
-		return 'No Keyword found'
-
-	conn.close()
+		#print(df)
+		#return jsonDumped
+		return df
 
 if __name__ == '__main__':
     app.run()
