@@ -1,6 +1,10 @@
 from flask import Flask
 import json
 import MySQLdb
+import pandas as pd
+import numpy as np
+from random import sample
+import mysql.connector as sql
 app = Flask(__name__)
 
 @app.route("/")
@@ -41,7 +45,7 @@ def search(keyword, number):
 
 	conn.close()
 
-@app.route("/get_rows/<chromosome>/<int: param_start>/<int: param_end>")
+@app.route("/get_rows/<chromosome>/<int:param_start>/<int:param_end>")
 def get_rows(chromosome, param_start, param_end):
 	conn = MySQLdb.connect(host= "localhost",
 	                  user="root",
@@ -51,10 +55,8 @@ def get_rows(chromosome, param_start, param_end):
 	strstart = "'"
 	strend = "'"
 	chromosome = strstart + chromosome + strend
-	param_start = strstart + param_start + strend
-	param_end = strstart + param_end + strend
 	try:
-		x.execute("SELECT * FROM human_genome WHERE chr = %s AND start >= %s AND end < %s " %(chromosome, param_start, param_end))
+		x.execute("SELECT * FROM human_genome WHERE chr = %s AND start >= %d AND end < %d " %(chromosome, param_start, param_end))
 		data = x.fetchall()
 		truedata = json.dumps(data)
 		return truedata
@@ -63,7 +65,7 @@ def get_rows(chromosome, param_start, param_end):
 
 	conn.close()
 
-@app.route("/get_values/<chromosome>/<int: param_start>/<int: param_end>/<any: measurements>")
+@app.route("/get_values/<chromosome>/<int:param_start>/<int:param_end>/<any:measurements>")
 def get_values(chromosome, param_start, param_end, measurements):
 	conn = MySQLdb.connect(host= "localhost",
 	                  user="root",
@@ -74,13 +76,13 @@ def get_values(chromosome, param_start, param_end, measurements):
 	strstart = "'"
 	strend = "'"
 	chromosome = strstart + chromosome + strend
+	columnNames = ",".join(measurement)
+	columnNames += ", chr, start, end"
 	truedata = []
 
 	try:
-		x.execute("SELECT pval, meth_diff, meth_avg FROM advancehumantbl WHERE seqnames = %s AND pval = %d AND meth_diff = %d AND meth_avg = %d AND start >= %d AND end < %d" %(chromosome, measurement[0], measurement[1], measurement[2], param_start, param_end))
-		#x.execute("SELECT * FROM advancehumantbl WHERE seqnames = %s AND start >= %s " %(chromosome, param_start))
+		x.execute("SELECT %s FROM chromosomes_sample WHERE chr = %s AND start >= %d AND end < %d" %(columnNames, chromosome, param_start, param_end))
 		data = x.fetchall()
-
 		jsonDumped = json.dumps(data)
 		
 		return jsonDumped
@@ -89,43 +91,56 @@ def get_values(chromosome, param_start, param_end, measurements):
 
 	conn.close()
 
-@app.route("/scale_data/<chromosome>/<int: param_start>/<int: param_end>/<any: measurement>/<int: resolution>")
-def scale_data(chromosome, param_start, param_end, measurements, resolution):
+@app.route("/scale_data/<chromosome>/<int:param_start>/<int:param_end>/<int:resolution>/<path:measurement>")
+def scale_data(chromosome, param_start, param_end, resolution, measurement):
 	strstart = "'"
 	strend = "'"
 	chromosome = strstart + chromosome + strend
 	seqnames = []
 
+	measurement = measurement.split("/")
+	columnNames = ",".join(measurement)
+	columnNames += ", chr, start, end"
+
 	final_genome_data = []
 	db_connection = sql.connect(host='localhost', database='genome', user='root', password='master')
-	df = pd.read_sql("SELECT * FROM advancehumantbl WHERE seqnames = %s AND pval = %d AND meth_diff = %d AND meth_avg = %d AND start >= %d AND end < %d" %(chromosome, measurement[0], measurement[1], measurement[2], param_start, param_end), con=db_connection)
-	#df = pd.read_sql("SELECT seqnames, start, end, pval, methylation_diff, methylation_avg FROM advancehumantbl", con=db_connection)
+	df = pd.read_sql("SELECT %s FROM chromosomes_sample WHERE chr = %s AND start >= %d AND end < %d" %(columnNames, chromosome, param_start, param_end), con=db_connection)
 
 	if len(df) - resolution < 20:
-			#jsonDumped = json.dumps(df)
-			#return jsonDumped
 			return df
 	else:
 		# Gets the min of start position and max of end position in genome
 		tempMin = df['start'].min()
 		tempMax = df['end'].max()
+		
+		new_res = len(df)/resolution
+
 		# create random index
-		rindex =  np.array(sample(xrange(len(df)), resolution))
-		seqnames =  df['seqnames'].values[rindex]
+		rindex =  np.array(sample(xrange(len(df)), len(df)/new_res+1))
+		seqnames =  df['chr'].values[rindex]
+
+		#print("Before scaling")
+		#print(len(df))
 
 		# Calculates the average of the pval, meth_diff, and meth_avg for every resolution
-		df = df.groupby(df.index//resolution).mean()
+		df = df.groupby(df.index//new_res).mean()
 
-		df['seqnames'] = ""
+		#print("After scaling")
+		#print(len(df))
+
+		df['chr'] = ""
 		for i in range(len(df)):
-			df.set_value(i, 'seqnames', seqnames[i])
+		 	df.set_value(i, 'chr', seqnames[i])
 
 		df['start'] = tempMin
 		df['end'] = tempMax
 
-		#print(df)
+		print(df)
 		#return jsonDumped
 		return df
+		#return "This works!"
+
+	db_connection.close()
 
 if __name__ == '__main__':
-    app.run()
+    app.run(threaded=True)
